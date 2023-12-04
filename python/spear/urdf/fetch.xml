@@ -522,20 +522,20 @@
             <inertia ixx="6.98014e-06" ixy="-2.62572e-08" ixz="-1.58206e-08" iyy="4.12665e-05" iyz="-1.57909e-09" izz="3.75763e-05"/>
         </inertial>
         <visual>
-            <origin rpy="0 0 0" xyz="0 -0.101425 0"/>
+            <origin rpy="0 0 0" xyz="0 0.101425 0"/>
             <geometry>
                 <mesh filename="StaticMesh'/UrdfBot/Fetch_V1/Meshes/gripper_finger_link_l.gripper_finger_link_l'"/>
             </geometry>
         </visual>
         <collision>
-            <origin rpy="0 0 0" xyz="0 -0.101425 0"/>
+            <origin rpy="0 0 0" xyz="0 0.101425 0"/>
             <geometry>
                 <mesh filename="StaticMesh'/UrdfBot/Fetch_V1/Meshes/gripper_finger_link_l.gripper_finger_link_l'"/>
             </geometry>
         </collision>
     </link>
     <joint name="gripper_finger_joint_l" type="prismatic">
-        <origin rpy="0 0 0" xyz="0 -0.015425 0"/>
+        <origin rpy="0 0 0" xyz="0 0 0"/>
         <parent link="gripper_link"/>
         <child link="gripper_finger_link_l"/>
         <axis xyz="0 -1 0"/>
@@ -550,20 +550,20 @@
             <inertia ixx="6.15416e-06" ixy="-1.5025e-09" ixz="0" iyy="3.87474e-05" iyz="0" izz="3.55162e-05"/>
         </inertial>
         <visual>
-            <origin rpy="0 0 0" xyz="0 0.101425 0"/>
+            <origin rpy="0 0 0" xyz="0 -0.101425 0"/>
             <geometry>
                 <mesh filename="StaticMesh'/UrdfBot/Fetch_V1/Meshes/gripper_finger_link_r.gripper_finger_link_r'"/>
             </geometry>
         </visual>
         <collision>
-            <origin rpy="0 0 0" xyz="0 0.101425 0"/>
+            <origin rpy="0 0 0" xyz="0 -0.101425 0"/>
             <geometry>
                 <mesh filename="StaticMesh'/UrdfBot/Fetch_V1/Meshes/gripper_finger_link_r.gripper_finger_link_r'"/>
             </geometry>
         </collision>
     </link>
     <joint name="gripper_finger_joint_r" type="prismatic">
-        <origin rpy="0 0 0" xyz="0 0.015425 0"/>
+        <origin rpy="0 0 0" xyz="0 0 0"/>
         <parent link="gripper_link"/>
         <child link="gripper_finger_link_r"/>
         <axis xyz="0 1 0"/>

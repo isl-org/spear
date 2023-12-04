@@ -39,7 +39,7 @@ void UUrdfLinkComponent::initializeComponent(UrdfLinkDesc* link_desc)
         float m_to_cm = 100.0f;
         UrdfLinkDesc* parent_link_desc = joint_desc->parent_link_desc_;
         FTransform link_origin_ = parent_link_desc->visual_descs_[0].origin_;
-        SetRelativeLocation((joint_desc->origin_.GetLocation() + link_desc->visual_descs_[0].origin_.GetLocation() - link_origin_.GetLocation()) * m_to_cm);
+        SetRelativeLocation((joint_desc->origin_.GetLocation() - link_desc->visual_descs_[0].origin_.GetLocation() - link_origin_.GetLocation()) * m_to_cm);
         SetRelativeRotation(joint_desc->origin_.GetRotation().Rotator() + link_desc->visual_descs_[0].origin_.GetRotation().Rotator());
     }
 
