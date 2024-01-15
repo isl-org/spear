@@ -15,6 +15,7 @@
 class Agent;
 class NavMesh;
 class RpcServer;
+class Scene;
 class Task;
 class Visualizer;
 enum class FrameState;
@@ -50,6 +51,7 @@ private:
     std::unique_ptr<Agent> agent_ = nullptr;
     std::unique_ptr<Task> task_ = nullptr;
     std::unique_ptr<NavMesh> nav_mesh_ = nullptr;
+    std::unique_ptr<Scene> scene_ = nullptr;
     std::unique_ptr<Visualizer> visualizer_ = nullptr;
     std::unique_ptr<RpcServer> rpc_server_ = nullptr;
 

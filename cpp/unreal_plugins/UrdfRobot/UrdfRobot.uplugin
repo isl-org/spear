@@ -23,6 +23,10 @@
     ],
     "Plugins": [
         {
+            "Name":  "CommonModuleRules",
+            "Enabled":  true
+        },
+        {
             "Name": "CoreUtils",
             "Enabled": true
         }

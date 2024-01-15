@@ -1,0 +1,43 @@
+#
+# Copyright(c) 2022 Intel. Licensed under the MIT License <http://opensource.org/licenses/MIT>.
+#
+
+SPEAR:
+  LAUNCH_MODE: "standalone_executable"
+
+  STANDALONE_EXECUTABLE: "/Users/mroberts/Downloads/SpearSim-Mac-Shipping/SpearSim-Mac-Shipping.app"
+
+  CUSTOM_COMMAND_LINE_ARGUMENTS: []
+  RENDER_OFFSCREEN: False
+  WINDOW_RESOLUTION_X: 512
+  WINDOW_RESOLUTION_Y: 512
+
+
+SIMULATION_CONTROLLER:
+  AGENT: "SphereAgent"
+  TASK: "NullTask"
+  CUSTOM_UNREAL_CONSOLE_COMMANDS: []
+
+  SCENE_ID: "apartment_0000"
+
+  SPHERE_AGENT:
+    SPHERE_ACTOR_NAME: "sphere_actor"
+    CAMERA_ACTOR_NAME: "camera_actor"
+    ACTION_COMPONENTS: ["add_force", "add_rotation"] # "add_force", "add_rotation"
+    OBSERVATION_COMPONENTS: ["camera", "location", "rotation"] # "camera", "location", "rotation"
+    STEP_INFO_COMPONENTS: ["debug"] # "debug"
+    SPAWN_LOCATION_X: 460.0
+    SPAWN_LOCATION_Y: 260.0
+    SPAWN_LOCATION_Z: 55.0 # sphere origin is roughly 25cm above the floor, and the floor in apartment_0000 is at roughly z=30cm
+    SPAWN_ROTATION_PITCH: 0.0
+    SPAWN_ROTATION_YAW: 0.0
+    SPAWN_ROTATION_ROLL: 0.0
+    CAMERA:
+      RENDER_PASSES: ["final_color"] # "depth", "final_color", "normal", "segmentation"
+      IMAGE_HEIGHT: 512
+      IMAGE_WIDTH: 512
+      FOV: 90.0
+
+  VISUALIZER:
+    ACTOR_NAME: "camera_actor"
+    SPAWN_CAMERA: False

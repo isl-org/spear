@@ -5,29 +5,21 @@
 from enum import Enum
 import gym.spaces
 import mmap
-import msgpackrpc 
 import multiprocessing.shared_memory
 import numpy as np
-import os
-import psutil
-from subprocess import Popen
 import spear
 import sys
-import time
 
 
 class Env(gym.Env):
-    def __init__(self, config):
+    def __init__(self, config, simulation_controller):
 
         super(Env, self).__init__()
 
         self._config = config
+        self._simulation_controller = simulation_controller
 
-        self._request_launch_unreal_instance()
-        self._initialize_rpc_client()
-        self._initialize_unreal_instance()
-
-        self._byte_order = self._get_byte_order()
+        self._byte_order = self._simulation_controller.get_byte_order()
 
         self._action_space_desc = SpaceDesc(self._get_action_space(), dict_space_type=gym.spaces.Dict, box_space_type=gym.spaces.Box)
         self._observation_space_desc = SpaceDesc(self._get_observation_space(), dict_space_type=gym.spaces.Dict, box_space_type=gym.spaces.Box)
@@ -41,28 +33,28 @@ class Env(gym.Env):
 
     def step(self, action):
         
-        self._begin_tick()
+        self._simulation_controller.begin_tick()
         self._apply_action(action)
-        self._tick()
+        self._simulation_controller.tick()
         obs = self._get_observation()
         reward = self._get_reward()
         is_done = not self._ready or self._is_episode_done() # if the last call to reset() failed or the episode is done
         step_info = self._get_step_info()
-        self._end_tick()
+        self._simulation_controller.end_tick()
 
         return obs, reward, is_done, step_info
 
     def reset(self, reset_info=None):
         
         for i in range(self._config.SPEAR.MAX_NUM_TICKS_AFTER_RESET):
-            self._begin_tick()
+            self._simulation_controller.begin_tick()
             if i == 0:
                 self._reset() # only reset the simulation once
-            self._tick()
+            self._simulation_controller.tick()
             ready = self._is_ready()
             if ready or i == self._config.SPEAR.MAX_NUM_TICKS_AFTER_RESET - 1:
                 obs = self._get_observation() # only get the observation if ready, or if we're about to give up
-            self._end_tick()
+            self._simulation_controller.end_tick()
             if ready:
                 break
 
@@ -85,315 +77,21 @@ class Env(gym.Env):
         self._task_step_info_space_desc.terminate()
         self._agent_step_info_space_desc.terminate()
 
-        # Note that in the constructor, we launch the Unreal instance first and then initialize the RPC client. Normally,
-        # we would do things in the reverse order here. But if we close the client first, then we can't send a command to
-        # the Unreal instance to close it. So we close the Unreal instance first and then close the client.
-        self._request_close_unreal_instance()
-        self._close_rpc_client()
-
-    def get_random_points(self, num_points):
-
-        self._begin_tick()
-        self._tick()
-        points = self._get_random_points(num_points)
-        self._end_tick()
-
-        return points
-
-    def get_random_reachable_points_in_radius(self, reference_points, radius):
-
-        self._begin_tick()
-        self._tick()
-        points = self._get_random_reachable_points_in_radius(reference_points, radius)
-        self._end_tick()
-
-        return points
-
-    def get_paths(self, initial_points, goal_points):
-
-        self._begin_tick()
-        self._tick()
-        points = self._get_paths(initial_points, goal_points)
-        self._end_tick()
-
-        return points
-
-    def _request_launch_unreal_instance(self):
-
-        if self._config.SPEAR.LAUNCH_MODE == "running_instance":
-            spear.log('SPEAR.LAUNCH_MODE == "running_instance" so we assume that the Unreal instance has already launched...')
-            return
-
-        spear.log("Launching Unreal instance...")
-
-        # write temp file
-        temp_dir = os.path.realpath(os.path.join(self._config.SPEAR.TEMP_DIR))
-        temp_config_file = os.path.realpath(os.path.join(temp_dir, "config.yaml"))
-
-        spear.log("Writing temp config file: " + temp_config_file)
-
-        os.makedirs(temp_dir, exist_ok=True)
-        with open(temp_config_file, "w") as output:
-            self._config.dump(stream=output, default_flow_style=False)
-
-        # create a symlink to SPEAR.PAKS_DIR
-        if self._config.SPEAR.LAUNCH_MODE == "standalone_executable" and self._config.SPEAR.PAKS_DIR != "":
-
-            assert os.path.exists(self._config.SPEAR.STANDALONE_EXECUTABLE)
-            assert os.path.exists(self._config.SPEAR.PAKS_DIR)
-
-            if sys.platform == "win32":
-                paks_dir = \
-                    os.path.realpath(os.path.join(os.path.dirname(os.path.realpath(self._config.SPEAR.STANDALONE_EXECUTABLE)), "..", "..", "Content", "Paks"))
-            elif sys.platform == "darwin":
-                paks_dir = \
-                    os.path.realpath(os.path.join(self._config.SPEAR.STANDALONE_EXECUTABLE, "Contents", "UE", "SpearSim", "Content", "Paks"))
-            elif sys.platform == "linux":
-                paks_dir = \
-                    os.path.realpath(os.path.join(os.path.dirname(os.path.realpath(self._config.SPEAR.STANDALONE_EXECUTABLE)), "SpearSim", "Content", "Paks"))
-            else:
-                assert False
-
-            assert os.path.exists(paks_dir)
-
-            # we don't use os.path.realpath here because we don't want to resolve the symlink
-            spear_paks_dir = os.path.join(paks_dir, "SpearPaks")
-
-            if spear.path_exists(spear_paks_dir):
-                spear.log(f"File or directory or symlink exists, removing: {spear_paks_dir}")
-                spear.remove_path(spear_paks_dir)
-
-            spear.log(f"Creating symlink: {spear_paks_dir} -> {self._config.SPEAR.PAKS_DIR}")
-            os.symlink(self._config.SPEAR.PAKS_DIR, spear_paks_dir)
-
-        # provide additional control over which Vulkan devices are recognized by Unreal
-        if self._config.SPEAR.VK_ICD_FILENAMES != "":
-            spear.log("Setting VK_ICD_FILENAMES environment variable: " + self._config.SPEAR.VK_ICD_FILENAMES)
-            os.environ["VK_ICD_FILENAMES"] = self._config.SPEAR.VK_ICD_FILENAMES
-
-        # set up launch executable and command-line arguments
-        launch_args = []
-
-        if self._config.SPEAR.LAUNCH_MODE == "uproject":
-            launch_executable = self._config.SPEAR.UNREAL_EDITOR_EXECUTABLE
-            launch_args.append(self._config.SPEAR.UPROJECT)
-            launch_args.append("-game") # launch the game using uncooked content
-        elif self._config.SPEAR.LAUNCH_MODE == "standalone_executable":
-            launch_executable = self._config.SPEAR.STANDALONE_EXECUTABLE
-        else:
-            assert False
-
-        assert os.path.exists(launch_executable)
-
-        launch_executable_name, launch_executable_ext = os.path.splitext(launch_executable)
-
-        if sys.platform == "win32":
-            assert launch_executable_name[-4:] == "-Cmd"
-            assert launch_executable_ext == ".exe"
-            launch_executable_internal = launch_executable
-        elif sys.platform == "darwin":
-            assert launch_executable_ext == ".app"
-            launch_executable_internal = os.path.realpath(os.path.join(launch_executable, "Contents", "MacOS", os.path.basename(launch_executable_name)))
-        elif sys.platform == "linux":
-            assert launch_executable_ext == ".sh"
-            launch_executable_internal = launch_executable
-        else:
-            assert False
-
-        assert os.path.exists(launch_executable_internal)
-
-        launch_args.append("-windowed")
-        launch_args.append("-resx={}".format(self._config.SPEAR.WINDOW_RESOLUTION_X))
-        launch_args.append("-resy={}".format(self._config.SPEAR.WINDOW_RESOLUTION_Y))
-        launch_args.append("-graphicsadapter={}".format(self._config.SPEAR.GPU_ID))
-        launch_args.append("-nosound")
-        launch_args.append("-fileopenlog")         # generate a log of which files are opened in which order
-        launch_args.append("-stdout")              # ensure log output is written to the terminal 
-        launch_args.append("-fullstdoutlogoutput") # ensure log output is written to the terminal
-        launch_args.append("-nologtimes")          # don't print timestamps next to log messages twice
-
-        if self._config.SPEAR.RENDER_OFFSCREEN:
-            launch_args.append("-renderoffscreen")
-
-        if self._config.SPEAR.UNREAL_INTERNAL_LOG_FILE != "":
-            launch_args.append("-log={}".format(self._config.SPEAR.UNREAL_INTERNAL_LOG_FILE))
-       
-        launch_args.append("-config_file={}".format(temp_config_file))
-
-        for a in self._config.SPEAR.CUSTOM_COMMAND_LINE_ARGUMENTS:
-            launch_args.append("{}".format(a))
-
-        cmd = [launch_executable_internal] + launch_args
-
-        spear.log("Launching executable with the following command-line arguments:")
-        spear.log_no_prefix(" ".join(cmd))
-
-        spear.log("Launching executable with the following config values:")
-        spear.log_no_prefix(self._config)
-
-        popen = Popen(cmd)
-        self._process = psutil.Process(popen.pid)
-
-        # see https://github.com/giampaolo/psutil/blob/master/psutil/_common.py for possible status values
-        status = self._process.status()
-        if status not in ["running", "sleeping", "disk-sleep"]:
-            spear.log("ERROR: Unrecognized process status: " + status)
-            spear.log("ERROR: Killing process " + str(self._process.pid) + "...")
-            self._force_kill_unreal_instance()
-            self._close_rpc_client()
-            assert False
-
-    def _request_close_unreal_instance(self):
-
-        if self._config.SPEAR.LAUNCH_MODE == "running_instance":
-            spear.log('SPEAR.LAUNCH_MODE == "running_instance" so we assume that the Unreal instance should remain open...')
-            return
-
-        spear.log("Closing Unreal instance...")
-
-        self._request_close()
-        self._wait_until_unreal_instance_is_closed()
-
-        spear.log("Finished closing Unreal instance.")
-
-    def _initialize_rpc_client(self):
-
-        spear.log("Initializing RPC client...")
-        
-        # if we're connecting to a running instance, then we assume that the RPC server is already running and only try to connect once
-        if self._config.SPEAR.LAUNCH_MODE == "running_instance":
-            connected = False
-            try:
-                self._rpc_client = msgpackrpc.Client(
-                    msgpackrpc.Address(self._config.SIMULATION_CONTROLLER.IP, self._config.SIMULATION_CONTROLLER.PORT),
-                    timeout=self._config.SPEAR.RPC_CLIENT_INTERNAL_TIMEOUT_SECONDS,
-                    reconnect_limit=self._config.SPEAR.RPC_CLIENT_INTERNAL_RECONNECT_LIMIT)
-                self._ping()
-                connected = True
-            except:
-                # Client may not clean up resources correctly in this case, so we clean things up explicitly.
-                # See https://github.com/msgpack-rpc/msgpack-rpc-python/issues/14 for more details.
-                self._close_rpc_client()
-
-        # otherwise try to connect repeatedly, since the RPC server might not have started yet
-        else:
-            connected = False
-            start_time_seconds = time.time()
-            elapsed_time_seconds = time.time() - start_time_seconds
-            while not connected and elapsed_time_seconds < self._config.SPEAR.RPC_CLIENT_INITIALIZE_CONNECTION_MAX_TIME_SECONDS:
-                # see https://github.com/giampaolo/psutil/blob/master/psutil/_common.py for possible status values
-                status = self._process.status()
-                if status not in ["disk-sleep", "running", "sleeping", "stopped"]:
-                    spear.log("ERROR: Unrecognized process status: " + status)
-                    spear.log("ERROR: Killing process " + str(self._process.pid) + "...")
-                    self._force_kill_unreal_instance()
-                    self._close_rpc_client()
-                    assert False
-                try:
-                    self._rpc_client = msgpackrpc.Client(
-                        msgpackrpc.Address(self._config.SIMULATION_CONTROLLER.IP, self._config.SIMULATION_CONTROLLER.PORT), 
-                        timeout=self._config.SPEAR.RPC_CLIENT_INTERNAL_TIMEOUT_SECONDS, 
-                        reconnect_limit=self._config.SPEAR.RPC_CLIENT_INTERNAL_RECONNECT_LIMIT)
-                    self._ping()
-                    connected = True
-                except:
-                    # Client may not clean up resources correctly in this case, so we clean things up explicitly.
-                    # See https://github.com/msgpack-rpc/msgpack-rpc-python/issues/14 for more details.
-                    self._close_rpc_client()
-                time.sleep(self._config.SPEAR.RPC_CLIENT_INITIALIZE_CONNECTION_SLEEP_TIME_SECONDS)
-                elapsed_time_seconds = time.time() - start_time_seconds
-
-        if not connected:
-            if self._config.SPEAR.LAUNCH_MODE != "running_instance":
-                spear.log("ERROR: Couldn't connect, killing process " + str(self._process.pid) + "...")
-                self._force_kill_unreal_instance()
-                self._close_rpc_client()
-            assert False
-
-        spear.log("Finished initializing RPC client.")
-
-    def _initialize_unreal_instance(self):
-
-        if self._config.SPEAR.LAUNCH_MODE == "running_instance":
-            spear.log('SPEAR.LAUNCH_MODE == "running_instance" so we assume that the Unreal instance is already initialized...')
-            return
-
-        spear.log("Initializing Unreal instance, warming up for " + str(1 + self._config.SPEAR.NUM_EXTRA_WARMUP_TICKS) + " ticks...")
-
-        # Do at least one complete tick to guarantee that we can receive valid observations. If we don't
-        # do this, it is possible that Unreal will return an initial visual observation of all zeros. We
-        # generally also want to do more than one tick to warm up various caches and rendering features
-        # that leverage temporal coherence between frames.
-        for i in range(1 + self._config.SPEAR.NUM_EXTRA_WARMUP_TICKS):
-            self._begin_tick()
-            self._tick()
-            self._end_tick()
-
-        spear.log("Finished initializing Unreal instance.")
-
-    def _wait_until_unreal_instance_is_closed(self):
-        try:
-            status = self._process.status()
-        except psutil.NoSuchProcess:
-            pass
-        else:
-            while status in ["running", "sleeping", "disk-sleep"]:
-                time.sleep(1.0)
-                try:
-                    status = self._process.status()
-                except psutil.NoSuchProcess:
-                    break
-
-    def _force_kill_unreal_instance(self):
-        self._process.terminate()
-        self._process.kill()
-
-    def _close_rpc_client(self):
-        self._rpc_client.close()
-        self._rpc_client._loop._ioloop.close()
-    
-    def _get_byte_order(self):
-        unreal_instance_byte_order = self._rpc_client.call("get_byte_order")
-        rpc_client_byte_order = sys.byteorder
-        if unreal_instance_byte_order == rpc_client_byte_order:
-            return None
-        elif unreal_instance_byte_order == "little":
-            return "<"
-        elif unreal_instance_byte_order == "big":
-            return ">"
-        else:
-            assert False
-
-    def _ping(self):
-        return self._rpc_client.call("ping")
-
-    def _request_close(self):
-        self._rpc_client.call("request_close")
-
-    def _begin_tick(self):
-        self._rpc_client.call("begin_tick")
-
-    def _tick(self):
-        self._rpc_client.call("tick")
-
-    def _end_tick(self):
-        self._rpc_client.call("end_tick")
-
     def _get_action_space(self):
-        array_desc = self._rpc_client.call("get_action_space")
+        array_desc = self._simulation_controller.rpc_client.call("get_action_space")
         assert len(array_desc) > 0
         return array_desc
 
     def _get_observation_space(self):
-        array_desc = self._rpc_client.call("get_observation_space")
+        array_desc = self._simulation_controller.rpc_client.call("get_observation_space")
         assert len(array_desc) > 0
         return array_desc
 
     def _get_task_step_info_space(self):
-        return self._rpc_client.call("get_task_step_info_space")
+        return self._simulation_controller.rpc_client.call("get_task_step_info_space")
 
     def _get_agent_step_info_space(self):
-        return self._rpc_client.call("get_agent_step_info_space")
+        return self._simulation_controller.rpc_client.call("get_agent_step_info_space")
 
     def _apply_action(self, action):
 
@@ -405,13 +103,13 @@ class Env(gym.Env):
         action_non_shared = { name:component for name, component in action.items() if name in self._action_space_desc.space_non_shared.spaces.keys() }
         action_non_shared_serialized = _serialize_arrays(
             action_non_shared, space=self._action_space_desc.space_non_shared, byte_order=self._byte_order)
-        self._rpc_client.call("apply_action", action_non_shared_serialized)
+        self._simulation_controller.rpc_client.call("apply_action", action_non_shared_serialized)
 
     def _get_observation(self):
 
         observation_shared = self._observation_space_desc.shared_memory_arrays
 
-        observation_non_shared_serialized = self._rpc_client.call("get_observation")
+        observation_non_shared_serialized = self._simulation_controller.rpc_client.call("get_observation")
         observation_non_shared = _deserialize_arrays(
             observation_non_shared_serialized, space=self._observation_space_desc.space_non_shared, byte_order=self._byte_order)
 
@@ -420,18 +118,18 @@ class Env(gym.Env):
         return {**observation_shared, **observation_non_shared}
 
     def _get_reward(self):
-        return self._rpc_client.call("get_reward")
+        return self._simulation_controller.rpc_client.call("get_reward")
     
     def _is_episode_done(self):
-        return self._rpc_client.call("is_episode_done")
+        return self._simulation_controller.rpc_client.call("is_episode_done")
 
     def _get_step_info(self):
 
         task_step_info_shared = self._task_step_info_space_desc.shared_memory_arrays
         agent_step_info_shared = self._agent_step_info_space_desc.shared_memory_arrays
 
-        task_step_info_non_shared_serialized = self._rpc_client.call("get_task_step_info")
-        agent_step_info_non_shared_serialized = self._rpc_client.call("get_agent_step_info")
+        task_step_info_non_shared_serialized = self._simulation_controller.rpc_client.call("get_task_step_info")
+        agent_step_info_non_shared_serialized = self._simulation_controller.rpc_client.call("get_agent_step_info")
 
         task_step_info_non_shared = _deserialize_arrays(
             task_step_info_non_shared_serialized, space=self._task_step_info_space_desc.space_non_shared, byte_order=self._byte_order)
@@ -448,26 +146,11 @@ class Env(gym.Env):
     def _reset(self):
         # reset the task first in case it needs to set the pose of actors,
         # then reset agent so it can refine the pose of actors
-        self._rpc_client.call("reset_task")
-        self._rpc_client.call("reset_agent")
+        self._simulation_controller.rpc_client.call("reset_task")
+        self._simulation_controller.rpc_client.call("reset_agent")
 
     def _is_ready(self):
-        return self._rpc_client.call("is_task_ready") and self._rpc_client.call("is_agent_ready")
-
-    def _get_random_points(self, num_points):
-        random_points = self._rpc_client.call("get_random_points", num_points)
-        return np.asarray(random_points, dtype=np.float64).reshape(num_points, 3)
-
-    def _get_random_reachable_points_in_radius(self, reference_points, search_radius):
-        assert reference_points.shape[1] == 3
-        reachable_points = self._rpc_client.call("get_random_reachable_points_in_radius", reference_points.flatten().tolist(), search_radius)
-        return np.asarray(reachable_points, dtype=np.float64).reshape(reference_points.shape)
-
-    def _get_paths(self, initial_points, goal_points):
-        assert initial_points.shape[1] == 3
-        assert goal_points.shape[1] == 3
-        paths = self._rpc_client.call("get_paths", initial_points.flatten().tolist(), goal_points.flatten().tolist())
-        return [ np.asarray(path, dtype=np.float64).reshape(-1, 3) for path in paths ]
+        return self._simulation_controller.rpc_client.call("is_task_ready") and self._simulation_controller.rpc_client.call("is_agent_ready")
 
 
 # metadata for describing a space including the shared memory objects

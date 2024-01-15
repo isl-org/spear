@@ -17,9 +17,8 @@
 
 #include "CoreUtils/Assert.h"
 #include "CoreUtils/Config.h"
-#include "CoreUtils/Unreal.h"
-
 #include "CoreUtils/Log.h"
+#include "CoreUtils/Unreal.h"
 
 void NavMesh::findObjectReferences(UWorld* world)
 {

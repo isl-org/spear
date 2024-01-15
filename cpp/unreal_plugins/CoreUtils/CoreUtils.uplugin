@@ -20,5 +20,11 @@
             "Type": "Runtime",
             "LoadingPhase": "EarliestPossible"
         }
+    ],
+    "Plugins":  [
+        {
+            "Name":  "CommonModuleRules",
+            "Enabled":  true
+        }
     ]
 }

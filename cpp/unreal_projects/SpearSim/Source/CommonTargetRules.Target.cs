@@ -32,7 +32,7 @@ public class CommonTargetRulesTarget : TargetRules
             // bOverrideBuildEnvironment = true;
             // AdditionalCompilerArguments = "/showIncludes";
 
-        } else if (target.Platform == UnrealTargetPlatform.Mac || target.Platform == UnrealTargetPlatform.Linux) {
+        } else if (target.Platform == UnrealTargetPlatform.Mac || target.Platform == UnrealTargetPlatform.Linux || target.Platform == UnrealTargetPlatform.LinuxArm64) {
 
             // On macOS and Linux, we need to remap the paths of our symbolic links as we're compiling our executable, so the paths that get
             // written into the application's debug symbols aren't symbolic links. This is necessary to enable debugging in XCode and LLDB.

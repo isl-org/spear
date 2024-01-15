@@ -34,6 +34,7 @@
 #include "SimulationController/NavMesh.h"
 #include "SimulationController/NullTask.h"
 #include "SimulationController/RpcServer.h"
+#include "SimulationController/Scene.h"
 #include "SimulationController/SphereAgent.h"
 #include "SimulationController/Task.h"
 #include "SimulationController/UrdfRobotAgent.h"
@@ -151,6 +152,34 @@ void SimulationController::postWorldInitializationEventHandler(UWorld* world, co
             // code.
             if (Config::get<std::string>("SIMULATION_CONTROLLER.INTERACTION_MODE") == "programmatic") {
                 world_begin_play_handle_ = world_->OnWorldBeginPlay.AddRaw(this, &SimulationController::worldBeginPlayEventHandler);
+
+                // The component hierarchy that is setup in Unreal Editor (as displayed in the outliner window),
+                // is modified when the game begins. Hence, this may cause issues in using GetAttachChildren()
+                // on components because, some components will no longer be attached to their parents as seen in
+                // the outliner. Instead, they would be moved to the same level/depth as the RootComponent.
+                // We see this behavior on components whose SimulatePhysics=True. These components and their
+                // children are moved to the same level/depth as the RootComponent. The reason could be that
+                // when simulate_physics is true, these components no longer have to follow the parent, instead
+                // they can move independently.
+                //
+                // Since we need to disable physics on all components anyway (physics is handled by MuJoCo), we will
+                // disable it during PostWorldInitialization and not in WorldBeginPlay because the component hierarchy
+                // would already be updated when the WorldBeginPlay is called. This way, the component hierarchy is
+                // maintained.
+                //
+                // Also, we do this only in programmatic mode because we do not want to alter the SimulatePhysics
+                // state while in Unreal Editor as our MuJoCo export code relies on this.
+
+                std::map<std::string, AActor*> actors_name_ref_map_ = Unreal::findActorsByTagAllAsMap(world_, {});
+                SP_ASSERT(!actors_name_ref_map_.empty());
+
+                for (auto& element : actors_name_ref_map_) {
+                    TArray<UPrimitiveComponent*> primitive_components;
+                    element.second->GetComponents<UPrimitiveComponent*>(primitive_components);
+                    for (auto& primitive_component : primitive_components) {
+                        primitive_component->SetSimulatePhysics(false);
+                    }
+                }
             }
         }
     }
@@ -205,6 +234,10 @@ void SimulationController::worldBeginPlayEventHandler()
     nav_mesh_ = std::make_unique<NavMesh>();
     SP_ASSERT(nav_mesh_);
 
+    // create Scene
+    scene_ = std::make_unique<Scene>();
+    SP_ASSERT(scene_);
+
     // create Visualizer
     visualizer_ = std::make_unique<Visualizer>(world_);
     SP_ASSERT(visualizer_);
@@ -213,6 +246,7 @@ void SimulationController::worldBeginPlayEventHandler()
     agent_->findObjectReferences(world_);
     task_->findObjectReferences(world_);
     nav_mesh_->findObjectReferences(world_);
+    scene_->findObjectReferences(world_);
     visualizer_->findObjectReferences(world_);
 
     // initialize frame state used for thread synchronization
@@ -253,6 +287,10 @@ void SimulationController::worldCleanupEventHandler(UWorld* world, bool session_
             SP_ASSERT(visualizer_);
             visualizer_->cleanUpObjectReferences();
             visualizer_ = nullptr;
+
+            SP_ASSERT(scene_);
+            scene_->cleanUpObjectReferences();
+            scene_ = nullptr;
 
             SP_ASSERT(nav_mesh_);
             nav_mesh_->cleanUpObjectReferences();
@@ -460,22 +498,154 @@ void SimulationController::bindFunctionsToRpcServer()
         return task_->isReady();
     });
 
-    rpc_server_->bindSync("get_random_points", [this](int num_points) -> std::vector<double> {
+    rpc_server_->bindSync("navmesh.get_random_points", [this](int num_points) -> std::vector<double> {
         SP_ASSERT(frame_state_ == FrameState::ExecutingPostTick);
         SP_ASSERT(nav_mesh_);
         return nav_mesh_->getRandomPoints(num_points);
     });
 
-    rpc_server_->bindSync("get_random_reachable_points_in_radius", [this](const std::vector<double>& initial_points, float radius) -> std::vector<double> {
+    rpc_server_->bindSync("navmesh.get_random_reachable_points_in_radius", [this](const std::vector<double>& initial_points, float radius) -> std::vector<double> {
         SP_ASSERT(frame_state_ == FrameState::ExecutingPostTick);
         SP_ASSERT(nav_mesh_);
         return nav_mesh_->getRandomReachablePointsInRadius(initial_points, radius);
     });
 
-    rpc_server_->bindSync("get_paths", [this](const std::vector<double>& initial_points, const std::vector<double>& goal_points) -> std::vector<std::vector<double>> {
+    rpc_server_->bindSync("navmesh.get_paths", [this](const std::vector<double>& initial_points, const std::vector<double>& goal_points) -> std::vector<std::vector<double>> {
         SP_ASSERT(frame_state_ == FrameState::ExecutingPostTick);
         SP_ASSERT(nav_mesh_);
         return nav_mesh_->getPaths(initial_points, goal_points);
+    });
+
+    rpc_server_->bindSync("scene.get_all_actor_names", [this]() -> std::vector<std::string> {
+        SP_ASSERT(frame_state_ == FrameState::ExecutingPostTick);
+        SP_ASSERT(scene_);
+        return scene_->getAllActorNames();
+    });
+
+    rpc_server_->bindSync("scene.get_all_scene_component_names", [this]() -> std::vector<std::string> {
+        SP_ASSERT(frame_state_ == FrameState::ExecutingPostTick);
+        SP_ASSERT(scene_);
+        return scene_->getAllSceneComponentNames();
+    });
+    
+    rpc_server_->bindSync("scene.get_all_actor_locations", [this]() -> std::map<std::string, std::vector<uint8_t>> {
+        SP_ASSERT(frame_state_ == FrameState::ExecutingPostTick);
+        SP_ASSERT(scene_);
+        return scene_->getAllActorLocations();
+    });
+
+    rpc_server_->bindSync("scene.get_all_actor_rotations", [this]() -> std::map<std::string, std::vector<uint8_t>> {
+        SP_ASSERT(frame_state_ == FrameState::ExecutingPostTick);
+        SP_ASSERT(scene_);
+        return scene_->getAllActorRotations();
+    });
+
+    rpc_server_->bindSync("scene.get_all_component_world_locations", [this]() -> std::map<std::string, std::vector<uint8_t>> {
+        SP_ASSERT(frame_state_ == FrameState::ExecutingPostTick);
+        SP_ASSERT(scene_);
+        return scene_->getAllComponentWorldLocations();
+    });
+
+    rpc_server_->bindSync("scene.get_all_component_world_rotations", [this]() -> std::map<std::string, std::vector<uint8_t>> {
+        SP_ASSERT(frame_state_ == FrameState::ExecutingPostTick);
+        SP_ASSERT(scene_);
+        return scene_->getAllComponentWorldRotations();
+    });
+
+    rpc_server_->bindSync("scene.get_actor_locations", [this](std::vector<std::string> actor_names) -> std::vector<std::uint8_t> {
+        SP_ASSERT(frame_state_ == FrameState::ExecutingPostTick);
+        SP_ASSERT(scene_);
+        return scene_->getActorLocations(actor_names);
+    });
+
+    rpc_server_->bindSync("scene.get_actor_rotations", [this](std::vector<std::string> actor_names) -> std::vector<std::uint8_t> {
+        SP_ASSERT(frame_state_ == FrameState::ExecutingPostTick);
+        SP_ASSERT(scene_);
+        return scene_->getActorRotations(actor_names);
+    });
+
+    rpc_server_->bindSync("scene.get_component_world_locations", [this](std::vector<std::string> component_names) -> std::vector<std::uint8_t> {
+        SP_ASSERT(frame_state_ == FrameState::ExecutingPostTick);
+        SP_ASSERT(scene_);
+        return scene_->getComponentWorldLocations(component_names);
+    });
+
+    rpc_server_->bindSync("scene.get_component_world_rotations", [this](std::vector<std::string> component_names) -> std::vector<std::uint8_t> {
+        SP_ASSERT(frame_state_ == FrameState::ExecutingPostTick);
+        SP_ASSERT(scene_);
+        return scene_->getComponentWorldRotations(component_names);
+    });
+
+    rpc_server_->bindSync("scene.get_static_mesh_components_for_actors", [this](std::vector<std::string> actor_names) -> std::map<std::string, std::vector<std::string>> {
+        SP_ASSERT(frame_state_ == FrameState::ExecutingPostTick);
+        SP_ASSERT(scene_);
+        return scene_->getStaticMeshComponentsForActors(actor_names);
+    });
+
+    rpc_server_->bindSync("scene.get_physics_constraint_components_for_actors", [this](std::vector<std::string> actor_names) -> std::map<std::string, std::vector<std::string>> {
+        SP_ASSERT(frame_state_ == FrameState::ExecutingPostTick);
+        SP_ASSERT(scene_);
+        return scene_->getPhysicsConstraintComponentsForActors(actor_names);
+    });
+
+    rpc_server_->bindSync("scene.is_using_absolute_location", [this](std::vector<std::string> object_names) -> std::vector<bool> {
+        SP_ASSERT(frame_state_ == FrameState::ExecutingPostTick);
+        SP_ASSERT(scene_);
+        return scene_->isUsingAbsoluteLocation(object_names);
+    });
+
+    rpc_server_->bindSync("scene.is_using_absolute_rotation", [this](std::vector<std::string> object_names) -> std::vector<bool> {
+        SP_ASSERT(frame_state_ == FrameState::ExecutingPostTick);
+        SP_ASSERT(scene_);
+        return scene_->isUsingAbsoluteRotation(object_names);
+    });
+
+    rpc_server_->bindSync("scene.is_using_absolute_scale", [this](std::vector<std::string> object_names) -> std::vector<bool> {
+        SP_ASSERT(frame_state_ == FrameState::ExecutingPostTick);
+        SP_ASSERT(scene_);
+        return scene_->isUsingAbsoluteScale(object_names);
+    });
+
+    rpc_server_->bindSync("scene.set_absolute", [this](std::vector<std::string> object_names, std::vector<bool> blocations, std::vector<bool> brotations, std::vector<bool> bscales) -> void {
+        SP_ASSERT(frame_state_ == FrameState::ExecutingPreTick);
+        SP_ASSERT(scene_);
+        scene_->SetAbolute(object_names, blocations, brotations, bscales);
+    });
+
+    rpc_server_->bindSync("scene.set_actor_locations", [this](std::map<std::string, std::vector<uint8_t>> actor_locations) -> void {
+        SP_ASSERT(frame_state_ == FrameState::ExecutingPreTick);
+        SP_ASSERT(scene_);
+        scene_->setActorLocations(actor_locations);
+    });
+
+    rpc_server_->bindSync("scene.set_actor_rotations", [this](std::map<std::string, std::vector<uint8_t>> actor_rotations) -> void {
+        SP_ASSERT(frame_state_ == FrameState::ExecutingPreTick);
+        SP_ASSERT(scene_);
+        scene_->setActorRotations(actor_rotations);
+    });
+
+    rpc_server_->bindSync("scene.set_component_world_locations", [this](std::map<std::string, std::vector<uint8_t>> component_locations) -> void {
+        SP_ASSERT(frame_state_ == FrameState::ExecutingPreTick);
+        SP_ASSERT(scene_);
+        scene_->setComponentWorldLocations(component_locations);
+    });
+    
+    rpc_server_->bindSync("scene.set_component_world_rotations", [this](std::map<std::string, std::vector<uint8_t>> component_rotations) -> void {
+        SP_ASSERT(frame_state_ == FrameState::ExecutingPreTick);
+        SP_ASSERT(scene_);
+        scene_->setComponentWorldRotations(component_rotations);
+    });
+
+    rpc_server_->bindSync("scene.set_component_relative_locations", [this](std::map<std::string, std::vector<uint8_t>> component_locations) -> void {
+        SP_ASSERT(frame_state_ == FrameState::ExecutingPreTick);
+        SP_ASSERT(scene_);
+        scene_->setComponentRelativeLocations(component_locations);
+    });
+
+    rpc_server_->bindSync("scene.set_component_relative_rotations", [this](std::map<std::string, std::vector<uint8_t>> component_rotations) -> void {
+        SP_ASSERT(frame_state_ == FrameState::ExecutingPreTick);
+        SP_ASSERT(scene_);
+        scene_->setComponentRelativeRotations(component_rotations);
     });
 }
 
