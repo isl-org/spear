@@ -1,0 +1,72 @@
+---
+# TODO(samarth) use yacs if possible, remove "scene" and "representation" from dir names
+common:
+  GLTF_SCENE_DIR_NAME: "gltf_scene"
+  COLLISION_DIR_NAME: "collision_representation"
+  CONVEX_DECOMPOSITION_DIR: "convex_decomposition"
+  CONVEX_DECOMPOSITION_EXT: ".stl"
+  PHYSICS_DIR_NAME: "{:s}_scene"
+
+
+collision_representation:
+  vhacd:
+    outputs: [ "decomp.obj", "decomp.stl", "decomp.mtl" ]
+    # enable convex decomposition using V-HACD
+    enable: True
+    # maximum number of output convex hulls for a single mesh
+    max_output_convex_hulls: 8
+    # total number of voxels to use (higher voxel resolutions will capture finer details but be more computationally intensive)
+    voxel_resolution: 400000
+    # volume error allowed as a percentage (lower values will result in higher number of convex hulls. Allow detecting regions that are already convex and stop spend time on them)
+    volume_error_percent: 0.001
+    # maximum recursion depth
+    max_recursion_depth: 64
+    # do not shrink wrap output to source mesh to better match the original mesh
+    disable_shrink_wrap: False
+    # fill mode, floor/surface/raycast
+    fill_mode: "floor"
+    # maximum number of vertices in the output convex hull (the higher the greater the computation effort on the physics engine side)
+    max_hull_vert_count: 512
+    # do not run asynchronously
+    disable_async: False
+    # minimum size of a voxel edge (default is usually fine)
+    min_edge_length: 2
+    # try to find optimal split plane location (experimental)
+    split_hull: False
+  
+  coacd:
+    # Whether threshold regression is used
+    auto_threshold: True
+    # Termination criteria in [0.01, 1] (0.01: most fine-grained; 1: most coarse), used only if auto_threshold == False
+    threshold: 0.02
+    # model for regressing threshold, used only if auto_threshold == True
+    threshold_model: [ -0.24555493, 0.23217532 ]
+    # Maximum number of convex hulls in the result, -1 for no limit, works only when merge is enabled
+    max_convex_hull: -1
+    # No remeshing before running CoACD. Only suitable for manifold input
+    preprocess_mode: "auto"
+    # Preprocessing resolution
+    preprocess_resolution: 100
+    # Surface samping resolution for Hausdorff distance computation
+    resolution: 2000
+    # Number of cut candidates for MCTS
+    mcts_nodes: 40
+    # Number of MCTS iterations
+    mcts_iterations: 500
+    # Maximum depth for MCTS search
+    mcts_max_depth: 7
+    # Use PCA to align input mesh. Suitable for non-axis-aligned mesh
+    pca: False
+    # If merge is enabled, try to reduce total number of parts by merging
+    merge: True
+    # Random seed
+    seed: 0
+
+  acd:
+    min_volume: 1.0e-3
+    decompose_method: "coacd"
+  
+
+mujoco:
+  joint_kp: 1.0e+10
+  joint_kd: 1.0e+10

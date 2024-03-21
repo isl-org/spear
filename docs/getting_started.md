@@ -22,7 +22,7 @@ The next step is to install the `spear` Python package as follows.
 
 ```console
 # create environment
-conda create --name spear-env python=3.8
+conda create --name spear-env python=3.10
 conda activate spear-env
 
 # install pip
@@ -30,10 +30,18 @@ conda install -c anaconda pip
 
 # install msgpack-rpc-python separately from other Python dependencies so
 # we can use a specific commit from the msgpack-rpc-python GitHub repository
-pip install -e third_party/msgpack-rpc-python
+python -m pip install -e third_party/msgpack-rpc-python
+
+# install a specific version of wheel and setuptools to avoid issue compiling gym
+# https://github.com/freqtrade/freqtrade/issues/8376#issuecomment-1519257211
+python -m pip install -U wheel==0.38.4 setuptools==65.5.0
 
 # install the spear Python package
-pip install -e python
+python -m pip install -e python
+
+# install Blender
+# required only for creating physics representations of new scenes
+python -m pip install bpy
 ```
 
 ### Navigate around a specific scene
