@@ -33,6 +33,7 @@ cpp/unreal_projects/SpearSim/SpearSimSource.pri
 cpp/unreal_projects/SpearSim/Saved
 cpp/unreal_projects/SpearSim/Standalone-Development
 cpp/unreal_projects/SpearSim/Standalone-Shipping
+cpp/unreal_projects/SpearSim/Temp
 cpp/unreal_projects/SpearSim/ThirdParty
 cpp/unreal_projects/SpearSim/user_config.yaml
 cpp/unreal_projects/SpearSim/.vs
@@ -40,6 +41,8 @@ cpp/unreal_projects/SpearSim/.vscode
 cpp/unreal_projects/SpearSim/.vsconfig
 cpp/unreal_projects/SpearSim/.ignore
 cpp/unreal_projects/SpearSim/.kdev4
+
+.DS_Store
 
 examples/generate_image_dataset/images
 examples/generate_image_dataset/tmp
@@ -64,4 +67,9 @@ examples/open_loop_control_fetch/user_config.yaml
 
 python/spear_sim.egg-info
 
+tmp
+tools/build
+tools/paks
 tools/tmp
+
+.vscode
