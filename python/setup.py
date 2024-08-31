@@ -19,7 +19,7 @@ setuptools.setup(
         "mayavi==4.8.2",
         "mujoco==3.1.3",
         "numpy==1.22.3",
-        "opencv-python==4.5.5.64",
+        "opencv-python==4.8.1.78",
         "pandas==1.5.1",
         "psutil==5.9.0",
         "scipy==1.10.1",
